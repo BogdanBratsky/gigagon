@@ -6,16 +6,56 @@ import (
 	"github.com/BogdanBratsky/proverb/internal/dto"
 	"github.com/BogdanBratsky/proverb/internal/model"
 	"github.com/BogdanBratsky/proverb/internal/service"
+	"github.com/BogdanBratsky/proverb/internal/ws"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 type roomHandler struct {
 	service *service.RoomService
+	hub     *ws.Hub
 }
 
-func NewRoomHandler(s *service.RoomService) *roomHandler {
-	return &roomHandler{service: s}
+func NewRoomHandler(s *service.RoomService, hub *ws.Hub) *roomHandler {
+	return &roomHandler{
+		service: s,
+		hub:     hub,
+	}
 }
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // для dev, потом ограничишь
+	},
+}
+
+// =========================
+// 🔵 WEB SOCKET
+// =========================
+
+func (h *roomHandler) WS(c *gin.Context) {
+	roomID := c.Param("id")
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
+	client := &ws.Client{
+		Conn:   conn,
+		Send:   make(chan []byte, 256),
+		RoomID: roomID,
+	}
+
+	h.hub.Register <- client
+
+	go client.WritePump()
+	go client.ReadPump(h.hub)
+}
+
+// =========================
+// 🔵 HTTP HANDLERS
+// =========================
 
 func ok(c *gin.Context, room *model.Room, playerID string, status int) {
 	c.JSON(status, dto.Resp{
